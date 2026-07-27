@@ -32,22 +32,34 @@ REPO_NAME="$(basename "$(git rev-parse --show-toplevel)")"
 
 echo "==> Enabling Nostr for '$REPO_NAME'"
 
+# Capture the pre-existing GitHub pushurl (if any) BEFORE ngit init rewrites
+# the remote, so we can preserve it afterwards.
+GITHUB_PUSHURL="$(git remote get-url --push origin 2>/dev/null | grep -E '^git@github.com|^https://github.com' | head -1 || true)"
+
 # 1. Announce to Nostr (sets nostr:// origin URL + NIP-34 event at HEAD).
 ngit init -d --name "$REPO_NAME"
 
 # 2. Add the nostr:// URL as a pushurl so `git push` reaches Nostr too.
 NOSTR_URL="$(git remote get-url origin)"
-if [[ "$NOSTR_URL" == nostr://* ]]; then
-  # Avoid duplicating the pushurl if already present.
-  if ! git remote get-url --push origin 2>/dev/null | grep -qxF "$NOSTR_URL"; then
-    git remote set-url --add --push origin "$NOSTR_URL"
-    echo "==> Added Nostr as a pushurl on origin"
-  else
-    echo "==> Nostr pushurl already present; skipping"
-  fi
-else
+if [[ "$NOSTR_URL" != nostr://* ]]; then
   echo "ERROR: expected a nostr:// origin URL after ngit init, got: $NOSTR_URL" >&2
   exit 1
+fi
+
+# Re-add the GitHub pushurl if ngit init dropped it.
+if [[ -n "$GITHUB_PUSHURL" ]]; then
+  if ! git remote get-url --push origin 2>/dev/null | grep -qxF "$GITHUB_PUSHURL"; then
+    git remote set-url --add --push origin "$GITHUB_PUSHURL"
+    echo "==> Restored GitHub pushurl on origin"
+  fi
+fi
+
+# Add the Nostr pushurl (idempotent).
+if ! git remote get-url --push origin 2>/dev/null | grep -qxF "$NOSTR_URL"; then
+  git remote set-url --add --push origin "$NOSTR_URL"
+  echo "==> Added Nostr as a pushurl on origin"
+else
+  echo "==> Nostr pushurl already present; skipping"
 fi
 
 # 3. Push to all configured remotes (GitHub, Radicle, Nostr).
