@@ -102,6 +102,11 @@ fi
 git config branch."$BR".remote github
 git config branch."$BR".merge "refs/heads/$BR"
 git config remote.pushDefault origin
+# Per-repo push.default=current so `git push` (no arg) always hits origin (the
+# triple mirror), regardless of any inherited push.default=upstream from the
+# user's global config. Without this, `branch.<main>.remote=github` + upstream
+# mode makes `git push` refuse origin ("not the upstream of your branch").
+git config push.default current
 git config remote.github.fetch "+refs/heads/$BR:refs/remotes/github/$BR"
 echo "==> git pull -> github (PRs), git push -> origin (GitHub+Radicle+Nostr)"
 

@@ -1,30 +1,32 @@
 # ngit-enable-repo
 
-Script to enable a Git repository for Nostr (ngit) so that `git push` also publishes the repo to Nostr / gitworkshop. This is the Nostr counterpart to [`rad-enable-repo`](https://github.com/rinchen/rad-enable-repo).
+Enable a Git repo for Nostr (ngit) so `git push` also publishes to Nostr/gitworkshop.
 
-## Usage
+Run from inside the target repo (requires a GitHub `origin` remote).
 
-```bash
-./ngit-enable-repo.sh
-```
+## What the script does now
 
-Run from **inside** the target Git repository. It will:
+1. `ngit init -d --name <repo>` — announce the repo to Nostr (sets the `nostr://` origin URL + NIP-34 event at HEAD).
+2. Restore GitHub as the **fetch** source of truth on `origin`, and rebuild `origin` pushurls so `git push` reaches **GitHub, Radicle (if present), and Nostr** — no duplicates.
+3. Split pull/push directions so `ngit init`'s remote rewrite can't reintroduce the blind-pull trap:
+   - `github` remote = **fetch-only** (PRs merge here).
+   - `origin` = **push target** (the triple-mirror pushurls).
+   - `branch.<main>.remote = github` → `git pull` reads GitHub.
+   - `remote.pushDefault = origin` → `git push` hits the mirror.
+   - `push.default = current` → no-arg `git push` hits `origin` even if your global `push.default` is `upstream`.
+4. `git push` to sync everything.
 
-1. `ngit init -d --name <repo>` — announce the repo to Nostr (sets the `nostr://` origin URL and the NIP-34 repo event pointing at HEAD).
-2. Add the `nostr://` URL as a pushurl on `origin` so a normal `git push` pushes to GitHub, Radicle (if present), **and** Nostr.
-3. `git push` to sync everything.
+## Resulting day-to-day workflow
 
-After running it, a plain `git push` keeps GitHub + Radicle + Nostr (gitworkshop) in sync natively — no hook, no per-push `ngit init`.
+- Open a PR: `git push -u github <branch>` (GitHub only — never leaks to the mirror).
+- After merge: `git pull` (from GitHub) → `git push` (to GitHub + Radicle + Nostr).
+- Clean up the branch when done.
+
+## Why
+
+`ngit init` repoints `origin` at the Nostr network. Left as-is, `git pull` fetches from Nostr (often empty/offline) and a GitHub-merged PR is invisible until `git push` rejects with non-fast-forward. Splitting pull (GitHub) from push (mirror) removes that trap.
 
 ## Requirements
 
-- [ngit](https://gitworkshop.dev/ngit) installed, with `git-remote-nostr` on PATH
-- An nsec configured (`git config --global nostr.nsec`, or a bunker reference)
-- An existing Git repository with a GitHub `origin` remote
-
-## How it works (vs. the wrong approach)
-
-`ngit sync` only pushes git refs and does **not** update the NIP-34 announcement gitworkshop reads. Likewise, `ngit send` opens a PR. The correct, native path is:
-
-- `ngit init` announces the repo (run once, or re-run to re-point HEAD).
-- Adding `nostr://` as a **pushurl** means `git push` drives the `git-remote-nostr` helper, which updates the announcement on every push.
+- `ngit` installed with `git-remote-nostr` on PATH; nsec configured (`git config --global nostr.nsec`, or a bunker reference).
+- GitHub `origin` remote present before running.
