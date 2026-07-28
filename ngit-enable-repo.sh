@@ -12,15 +12,24 @@
 #      present), AND Nostr — in that order, with no duplicates.
 #   3. `git push` to sync everything.
 #
-# IMPORTANT — why this ordering matters:
+# IMPORTANT — why this matters:
 #   `ngit init` rewrites `origin`'s URL to the `nostr://` remote and leaves the
 #   GitHub/Radicle URLs only as pushurls. If we leave it that way, `git pull`
 #   fetches from Nostr (which can be empty or offline) and fails with
-#   "no such ref was fetched". So we ALWAYS restore `origin.fetch` to GitHub
-#   (the source of truth) and keep GitHub + Radicle + Nostr as pushurls only.
+#   "no such ref was fetched". Worse, if a PR merges on GitHub, `git pull`
+#   (fetching Nostr) reports "Already up to date" and the divergence is invisible
+#   until `git push` rejects with non-fast-forward.
 #
-# After this, `git pull` works from GitHub and `git push` keeps GitHub +
-# Radicle + Nostr (gitworkshop) in sync natively — no hook, no per-push
+# DURABLE FIX — we split the two directions explicitly so ngit's remote rewriting
+# can't reintroduce the trap:
+#   * `github` remote = FETCH-ONLY source of truth (PRs merge here).
+#   * `origin` = PUSH target only (GitHub + Radicle + Nostr pushurls).
+#   * `branch.<main>.remote = github`  -> `git pull` consults GitHub.
+#   * `remote.pushDefault = origin`    -> `git push` hits the triple mirror.
+# Two independent knobs; ngit's `origin` rewrite no longer affects pulls.
+#
+# After this, `git pull` works from GitHub (sees merged PRs) and `git push` keeps
+# GitHub + Radicle + Nostr (gitworkshop) in sync natively — no hook, no per-push
 # `ngit init`.
 #
 # Requirements:
@@ -80,7 +89,23 @@ else
   echo "==> Nostr pushurl already present; skipping"
 fi
 
-# 3. Push to all configured remotes (GitHub, Radicle, Nostr).
+# 4. Split pull/push directions so ngit's `origin` rewrite can't reintroduce
+#    the blind-`git-pull` trap. `github` = fetch-only source of truth (PRs land
+#    here); `origin` = PUSH target (triple mirror). `remote.pushDefault=origin`
+#    keeps `git push` off `github`; `branch.<main>.remote=github` points pulls
+#    at GitHub. Scoped fetch avoids registering every upstream branch.
+BR="$(git rev-parse --abbrev-ref HEAD)"
+if ! git remote get-url github >/dev/null 2>&1; then
+  git remote add github "$GITHUB_URL"
+  echo "==> Added GitHub as a FETCH-ONLY remote"
+fi
+git config branch."$BR".remote github
+git config branch."$BR".merge "refs/heads/$BR"
+git config remote.pushDefault origin
+git config remote.github.fetch "+refs/heads/$BR:refs/remotes/github/$BR"
+echo "==> git pull -> github (PRs), git push -> origin (GitHub+Radicle+Nostr)"
+
+# 5. Push to all configured remotes (GitHub, Radicle, Nostr).
 git push
 
 echo "==> Done. '$REPO_NAME' is now published to Nostr (gitworkshop)."
